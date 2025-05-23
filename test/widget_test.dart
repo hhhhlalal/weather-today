@@ -8,11 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-<<<<<<< HEAD
-import 'package:weather_today/main.dart';
-=======
 import 'package:baadal/main.dart';
->>>>>>> 8be2173 (add new project)
 
 void main() {
   testWidgets('Counter increments smoke test', (WidgetTester tester) async {

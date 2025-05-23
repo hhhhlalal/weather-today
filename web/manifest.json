@@ -1,11 +1,6 @@
 {
-<<<<<<< HEAD
-    "name": "weather_today",
-    "short_name": "weather_today",
-=======
-    "name": "baadal",
-    "short_name": "baadal",
->>>>>>> 8be2173 (add new project)
+    "name": "Thai",
+    "short_name": "Thai",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
