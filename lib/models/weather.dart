@@ -3,20 +3,23 @@ class Weather {
   final double temperature;
   final String condition;
   final String iconCode;
+  final double humidity;
+  final double pressure;
+  final double windSpeed;
+  final double uvIndex;
+  final double tempMax;
+  final double tempMin;
 
   Weather({
+    required this.tempMax,
+    required this.tempMin,
     required this.cityName,
     required this.temperature,
     required this.condition,
     required this.iconCode,
+    required this.humidity,
+    required this.pressure,
+    required this.windSpeed,
+    required this.uvIndex,
   });
-
-  factory Weather.fromJson(Map<String, dynamic> json) {
-    return Weather(
-      cityName: json['name'],
-      temperature: (json['main']['temp'] as num).toDouble(),
-      condition: json['weather'][0]['description'],
-      iconCode: json['weather'][0]['icon'],
-    );
-  }
 }

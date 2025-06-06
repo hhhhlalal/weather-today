@@ -1,22 +1,17 @@
 class DailyForecast {
   final DateTime date;
-  final double temperature;
+  final double tempMax;
+  final double tempMin;
   final String condition;
   final String iconCode;
+  final double? humidity; 
 
   DailyForecast({
     required this.date,
-    required this.temperature,
+    required this.tempMax,
+    required this.tempMin,
     required this.condition,
     required this.iconCode,
+    this.humidity, 
   });
-
-  factory DailyForecast.fromJson(Map<String, dynamic> json) {
-    return DailyForecast(
-      date: DateTime.fromMillisecondsSinceEpoch(json['dt'] * 1000),
-      temperature: (json['main']['temp'] as num).toDouble(),
-      condition: json['weather'][0]['description'],
-      iconCode: json['weather'][0]['icon'],
-    );
-  }
 }
