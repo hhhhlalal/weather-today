@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:provider/provider.dart';
 import 'theme/dark_theme.dart';
-import 'screens/home_screen.dart';
+import 'providers/selected_city_provider.dart';
+import 'screens/weather_main_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('vi', null);
-  runApp(const WeatherDemoApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => SelectedCityProvider(),
+      child: const WeatherDemoApp(),
+    ),
+  );
 }
 
 class WeatherDemoApp extends StatelessWidget {
@@ -18,7 +25,7 @@ class WeatherDemoApp extends StatelessWidget {
       title: 'Weather App',
       debugShowCheckedModeBanner: false,
       theme: darkWeatherTheme,
-      home: const HomeScreen(),
+      home: const MainWeatherScreen(),
     );
   }
 }

@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:dio/dio.dart';
-import 'package:weather_today/theme/cloud_bg.dart';
-import '../models/weather.dart';
+import 'package:flutter/services.dart';
+import '../models/current_weather.dart';
 import '../utils/date_utils.dart';
-import '../utils/location_utils.dart'; 
+import '../utils/openweather_utils.dart';
+import '../utils/openweather_lottie_utils.dart';
+import 'package:lottie/lottie.dart';
+import 'dart:async';
+import 'package:provider/provider.dart';
+import '../providers/selected_city_provider.dart';
 
 class CurrentWeatherScreen extends StatefulWidget {
-  final String cityName;
-  const CurrentWeatherScreen({super.key, required this.cityName});
+  final Future<void> Function()? onShowMenu;
+  const CurrentWeatherScreen({super.key, this.onShowMenu});
 
   @override
   State<CurrentWeatherScreen> createState() => _CurrentWeatherScreenState();
@@ -17,179 +21,271 @@ class _CurrentWeatherScreenState extends State<CurrentWeatherScreen> {
   Weather? _weather;
   bool _loading = false;
   String? _error;
-  String? _currentCity;
+  String? _lunarVN;
+  final FocusNode _focusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
     _fetchWeather();
+    _fetchLunar();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
   }
 
   @override
-  void didUpdateWidget(covariant CurrentWeatherScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);// Kiểm tra nếu tên thành phố thay đổi thì gọi lại API
-    if (widget.cityName != oldWidget.cityName) {
-      _fetchWeather();// Gọi lại hàm lấy thời tiết mới
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _fetchLunar() async {
+    try {
+      final lunarStr = await getLunarDateStrVN(DateTime.now())
+          .timeout(const Duration(seconds: 5));
+      if (mounted) {
+        setState(() => _lunarVN = lunarStr);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _lunarVN = 'Lỗi tải lịch âm');
+      }
     }
   }
 
   Future<void> _fetchWeather() async {
     if (!mounted) return;
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
     try {
-      String cityToUse = widget.cityName;
-      if (widget.cityName.toLowerCase() == 'auto') {
-        cityToUse = await LocationHelper.getCityFromIP() ?? 'Hanoi';
+      final selectedCityProvider = Provider.of<SelectedCityProvider>(context, listen: false);
+      Map<String, dynamic>? data;
+
+      if (selectedCityProvider.cityName != null && 
+          selectedCityProvider.lat != null && 
+          selectedCityProvider.lon != null) {
+        data = await fetchCurrentWeatherByLatLon(
+          selectedCityProvider.lat!, 
+          selectedCityProvider.lon!
+        ).timeout(const Duration(seconds: 10));
+      } else {
+        final coords = await getLatLonFromIP()
+            .timeout(const Duration(seconds: 10));
+        if (coords == null) {
+          throw Exception('Không lấy được tọa độ từ IP');
+        }
+
+        data = await fetchCurrentWeatherByLatLon(coords['lat']!, coords['lon']!)
+            .timeout(const Duration(seconds: 10));
       }
-      _currentCity = cityToUse;
-      // Sử dụng Dio để gọi API
-      final dio = Dio();
-      final geoRes = await dio.get(
-        'https://geocoding-api.open-meteo.com/v1/search',
-        queryParameters: {'name': cityToUse, 'count': 1, 'language': 'vi'},
-      );// Lấy tọa độ thành phố
-      final results = geoRes.data['results'];
-      if (results == null || results is! List || results.isEmpty) {
-        throw Exception('Không tìm thấy thành phố');
-      }
-      // Lấy tọa độ đầu tiên
-      final location = results[0];
-      final lat = location['latitude'];
-      final lon = location['longitude'];
-      if (lat == null || lon == null) {
-        throw Exception('Không lấy được tọa độ thành phố');
-      }
-      // Gọi API thời tiết
-      final weatherRes = await dio.get(
-        'https://api.open-meteo.com/v1/forecast',
-        queryParameters: {
-          'latitude': lat,
-          'longitude': lon,
-          'hourly': 'temperature_2m,weathercode,windspeed_10m,relative_humidity_2m,surface_pressure,uv_index',
-          'daily': 'temperature_2m_max,temperature_2m_min',
-          'timezone': 'Asia/Ho_Chi_Minh',
-        },
-      );
-      // Kiểm tra dữ liệu trả về
-      final hourlyData = weatherRes.data['hourly'];
-      final dailyData = weatherRes.data['daily'];
-      if (hourlyData == null || dailyData == null) {
+
+      if (data == null) {
         throw Exception('Không lấy được dữ liệu thời tiết');
       }
-      // Lấy dữ liệu cần thiết
-      final now = DateTime.now();
-      final currentIndex = now.hour;
-      final temperatures = (hourlyData['temperature_2m'] as List<dynamic>?) ?? [];// Danh sách nhiệt độ theo giờ
-      final weathercodes = (hourlyData['weathercode'] as List<dynamic>?) ?? [];// Danh sách mã thời tiết
-      final humidities = (hourlyData['relative_humidity_2m'] as List<dynamic>?) ?? []; // Danh sách độ ẩm
-      final pressures = (hourlyData['surface_pressure'] as List<dynamic>?) ?? [];// Danh sách áp suất
-      final windSpeeds = (hourlyData['windspeed_10m'] as List<dynamic>?) ?? [];// Danh sách tốc độ gió
-      final uvIndices = (hourlyData['uv_index'] as List<dynamic>?) ?? [];// Danh sách chỉ số UV
-      final dailyMaxTemps = (dailyData['temperature_2m_max'] as List<dynamic>?) ?? []; // Danh sách nhiệt độ cao nhất theo ngày
-      final dailyMinTemps = (dailyData['temperature_2m_min'] as List<dynamic>?) ?? [];// Danh sách nhiệt độ thấp nhất theo ngày
-      if (temperatures.isEmpty || currentIndex >= temperatures.length) {// Kiểm tra dữ liệu nhiệt độ
-        throw Exception('Dữ liệu nhiệt độ không hợp lệ');
+
+      final weather = data;
+      final icon = weather['weather'][0]['icon'] as String;
+      final temp = (weather['main']['temp'] as num).toDouble();
+      final humidity = (weather['main']['humidity'] as num).toDouble();
+      final pressure = (weather['main']['pressure'] as num).toDouble();
+      final windSpeed = (weather['wind']['speed'] as num).toDouble();
+      final cityName = selectedCityProvider.cityName ?? weather['name'];
+      final int? cloudiness = weather['clouds']?['all'] is int ? weather['clouds']['all'] as int : null;
+
+      if (mounted) {
+        _weather = Weather(
+          cityName: cityName,
+          temperature: temp,
+          tempMax: temp,
+          tempMin: temp,
+          condition: weather['weather'][0]['main'],
+          iconCode: icon,
+          humidity: humidity,
+          pressure: pressure,
+          windSpeed: windSpeed,
+          uvIndex: 0,
+          cloudiness: cloudiness,
+        );
+        setState(() {});
       }
-      _weather = Weather(
-        cityName: _currentCity ?? cityToUse,
-        temperature: (temperatures[currentIndex] as num?)?.toDouble() ?? 0.0,
-        tempMax: (dailyMaxTemps.isNotEmpty ? (dailyMaxTemps[0] as num?)?.toDouble() : null) ?? 0.0,// Nhiệt độ cao nhất
-        tempMin: (dailyMinTemps.isNotEmpty ? (dailyMinTemps[0] as num?)?.toDouble() : null) ?? 0.0,// Nhiệt độ thấp nhất
-        condition: _getWeatherDescription((currentIndex < weathercodes.length ? weathercodes[currentIndex] as int? : null) ?? 0),// Mô tả thời tiết
-        iconCode: _getWeatherIcon((currentIndex < weathercodes.length ? weathercodes[currentIndex] as int? : null) ?? 0),// Mã icon thời tiết
-        humidity: (currentIndex < humidities.length ? (humidities[currentIndex] as num?)?.toDouble() : null) ?? 0.0,// Độ ẩm
-        pressure: (currentIndex < pressures.length ? (pressures[currentIndex] as num?)?.toDouble() : null) ?? 0.0,// Áp suất
-        windSpeed: (currentIndex < windSpeeds.length ? (windSpeeds[currentIndex] as num?)?.toDouble() : null) ?? 0.0,// Tốc độ gió
-        uvIndex: (currentIndex < uvIndices.length ? (uvIndices[currentIndex] as num?)?.toDouble() : null) ?? 0.0,// Chỉ số UV
-      );
-      if (!mounted) return;
-      setState(() {});
+    } on TimeoutException {
+      if (mounted) {
+        setState(() => _error = 'Timeout: Không thể kết nối đến server');
+      }
     } catch (e) {
-      if (!mounted) return;
-      setState(() { _error = 'Lỗi: ${e.toString()}'; });
+      if (mounted) {
+        setState(() => _error = 'Lỗi: ${e.toString()}');
+      }
     } finally {
-      if (!mounted) return;
-      setState(() { _loading = false; });
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
-// Lấy icon thời tiết dựa trên mã thời tiết
-  String _getWeatherIcon(int code) {
-    switch (code) {
-      case 0: return '01d';
-      case 1: case 2: case 3: return '02d';
-      case 45: case 48: return '50d';
-      case 51: case 53: case 55: return '09d';
-      case 61: case 63: case 65: return '10d';
-      case 71: case 73: case 75: return '13d';
-      case 95: return '11d';
-      default: return '03d';
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp && widget.onShowMenu != null) {
+      widget.onShowMenu!();
+      return KeyEventResult.handled;
     }
+    return KeyEventResult.ignored;
   }
-// Lấy mô tả thời tiết dựa trên mã thời tiết
-  String _getWeatherDescription(int code) {
-    switch (code) {
-      case 0: return 'Trời quang';
-      case 1: case 2: case 3: return 'Trời có mây vài nơi';
-      case 45: case 48: return 'Sương mù';
-      case 51: case 53: case 55: return 'Mưa phùn';
-      case 61: case 63: case 65: return 'Mưa';
-      case 71: case 73: case 75: return 'Tuyết rơi';
-      case 95: return 'Giông bão';
-      default: return 'Nhiều mây';
+
+  Future<bool> _onWillPop() async {
+    final shouldExit = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('Xác nhận'),
+        content: const Text('Bạn có chắc chắn muốn thoát khỏi ứng dụng không?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Không'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Có'),
+          ),
+        ],
+      ),
+    );
+    if (shouldExit == true) {
+      SystemNavigator.pop();
+      return false;
     }
+    return false;
+  }
+
+  Widget _buildWeatherIcon(String iconCode) {
+    final lottieInfo = getOWMLottieWeather(iconCode);
+    return Lottie.asset(
+      'assets/lottie/${lottieInfo.lottieFile}',
+      width: 120,
+      height: 120,
+      fit: BoxFit.contain,
+      repeat: false,
+      errorBuilder: (context, error, stackTrace) =>
+          const Icon(Icons.error_outline, size: 120),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) return CloudyBackground(child: Text(_error!));
-    if (_weather == null) return const Center(child: Text('Không có dữ liệu'));
-    final now = DateTime.now();
-    final lunarStr = getLunarDateStr(now);
-    return CloudyBackground(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            '${now.day}/${now.month}/${now.year}',
-            style: const TextStyle(fontSize: 17, color: Colors.white),
+    return Consumer<SelectedCityProvider>(
+      builder: (context, selectedCityProvider, child) {
+        // Tự động fetch lại khi có thành phố mới được chọn
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (selectedCityProvider.cityName != null && _weather?.cityName != selectedCityProvider.cityName) {
+            _fetchWeather();
+          }
+        });
+
+        final content = _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                        const SizedBox(height: 16),
+                        Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _fetchWeather,
+                          child: const Text('Thử lại'),
+                        ),
+                      ],
+                    ),
+                  )
+                : _weather == null
+                    ? const Center(child: Text('Không có dữ liệu'))
+                    : Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
+                              style: const TextStyle(fontSize: 17, color: Colors.white),
+                            ),
+                            Text(
+                              _lunarVN ?? 'Đang tải lịch âm...',
+                              style: const TextStyle(fontSize: 14, color: Colors.deepOrange),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              _weather!.cityName,
+                              style: Theme.of(context).textTheme.headlineMedium,
+                            ),
+                            _buildWeatherIcon(_weather!.iconCode),
+                            Text(
+                              '${_weather!.temperature.round()}°C',
+                              style: Theme.of(context).textTheme.displayMedium,
+                            ),
+                            Text(
+                              getOWMLottieWeather(_weather!.iconCode).viDesc,
+                              style: Theme.of(context).textTheme.bodyLarge,
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Nhiệt độ cảm nhận: ${_weather!.tempMax.round()}°C',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _InfoIcon(
+                                  icon: Icons.opacity,
+                                  label: 'Độ ẩm',
+                                  value: '${_weather!.humidity?.round() ?? "--"}%',
+                                ),
+                                const SizedBox(width: 20),
+                                _InfoIcon(
+                                  icon: Icons.compress,
+                                  label: 'Áp suất',
+                                  value: '${_weather!.pressure.round()} hPa',
+                                ),
+                                const SizedBox(width: 20),
+                                _InfoIcon(
+                                  icon: Icons.air,
+                                  label: 'Gió',
+                                  value: '${_weather!.windSpeed.toStringAsFixed(1)} m/s',
+                                ),
+                                const SizedBox(width: 20),
+                                _InfoIcon(
+                                  icon: Icons.cloud,
+                                  label: 'Mây',
+                                  value: '${_weather!.cloudiness?.round() ?? "--"}%',
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+
+        return WillPopScope(
+          onWillPop: _onWillPop,
+          child: Scaffold(
+            body: Focus(
+              focusNode: _focusNode,
+              autofocus: true,
+              onKeyEvent: _handleKeyEvent,
+              child: content,
+            ),
           ),
-          Text(
-            lunarStr,
-            style: const TextStyle(fontSize: 14, color: Colors.deepOrange),
-          ),
-          const SizedBox(height: 10),
-          Text(_weather!.cityName, style: Theme.of(context).textTheme.headlineMedium),
-          Image.network(
-            'https://openweathermap.org/img/wn/${_weather!.iconCode}@2x.png',
-            width: 120, height: 120,
-            errorBuilder: (context, error, stackTrace) {
-              return const Icon(Icons.error_outline, size: 120);
-            },
-          ),
-          Text('${_weather!.temperature.round()}°C',
-              style: Theme.of(context).textTheme.displayMedium),
-          Text(_weather!.condition, style: Theme.of(context).textTheme.bodyLarge),
-          const SizedBox(height: 10),
-          Text(
-            'Nhiệt độ cao nhất: ${_weather!.tempMax.round()}°C, thấp nhất: ${_weather!.tempMin.round()}°C',
-            style: const TextStyle(color: Colors.white),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _InfoIcon(icon: Icons.opacity, label: 'Độ ẩm', value: '${_weather!.humidity.round()}%'),
-              const SizedBox(width: 20),
-              _InfoIcon(icon: Icons.compress, label: 'Áp suất', value: '${_weather!.pressure.round()} hPa'),
-              const SizedBox(width: 20),
-              _InfoIcon(icon: Icons.air, label: 'Gió', value: '${_weather!.windSpeed.toStringAsFixed(1)} m/s'),
-              const SizedBox(width: 20),
-              _InfoIcon(icon: Icons.wb_sunny, label: 'UV', value: '${_weather!.uvIndex.toStringAsFixed(1)}'),
-            ],
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -198,14 +294,30 @@ class _InfoIcon extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
-  const _InfoIcon({required this.icon, required this.label, required this.value});
+
+  const _InfoIcon({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         Icon(icon, size: 28, color: Colors.blue),
-        Text(label, style: const TextStyle(fontSize: 13, color: Colors.white)),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 13, color: Colors.white),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            color: Colors.white,
+          ),
+        ),
       ],
     );
   }

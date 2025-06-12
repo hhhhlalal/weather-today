@@ -4,7 +4,8 @@ class DailyForecast {
   final double tempMin;
   final String condition;
   final String iconCode;
-  final double? humidity; 
+  final double? humidity;
+  final int? cloudiness;
 
   DailyForecast({
     required this.date,
@@ -12,6 +13,7 @@ class DailyForecast {
     required this.tempMin,
     required this.condition,
     required this.iconCode,
-    this.humidity, 
+    this.humidity,
+    this.cloudiness,
   });
 }
